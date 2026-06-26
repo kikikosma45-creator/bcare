@@ -66,8 +66,8 @@
       <div class="quote-form-wrap" id="form-section">
 
         <div class="purpose-tabs" role="tablist">
-          <button class="purpose-tab" id="ptab-transfer" role="tab" data-purpose="2">نقل ملكية</button>
           <button class="purpose-tab active" id="ptab-new" role="tab" data-purpose="1">تأمين جديد</button>
+          <button class="purpose-tab" id="ptab-transfer" role="tab" data-purpose="2">نقل ملكية</button>
         </div>
 
         <form class="quote-form" id="quote-form" novalidate autocomplete="off">
@@ -139,7 +139,7 @@
               </label>
               <input type="text" id="customs-number" name="customsNumber"
                      class="form-input" placeholder="الرقم الجمركي"
-                     maxlength="10" inputmode="numeric" />
+                     maxlength="19" inputmode="numeric" />
               <div class="field-error" id="customs-error"></div>
             </div>
             <div class="form-group form-group--half">
@@ -152,22 +152,26 @@
               </div>
               <div class="field-error" id="mfg-year-error"></div>
             </div>
+            <div class="customs-notice" id="customs-notice">
+              <span class="material-icons">warning</span>
+              <span>تأكد من صحة الرقم الجمركي وسنة الصنع — البطاقة الجمركية تخضع للتحقق</span>
+            </div>
           </div>
 
           <!-- رمز التحقق -->
           <div class="form-group">
             <label class="form-label" for="captcha-input">رمز التحقق</label>
             <div class="captcha-row" id="captcha-row">
+              <input type="text" id="captcha-input" name="captchaInput"
+                     class="form-input captcha-input-field"
+                     placeholder="" maxlength="8"
+                     autocomplete="off" autocorrect="off" spellcheck="false" />
               <div class="captcha-display">
                 <canvas id="captcha-canvas" width="110" height="44" aria-hidden="true"></canvas>
                 <button type="button" class="captcha-refresh" id="captcha-refresh" aria-label="تحديث رمز التحقق">
                   <span class="material-icons">autorenew</span>
                 </button>
               </div>
-              <input type="text" id="captcha-input" name="captchaInput"
-                     class="form-input captcha-input-field"
-                     placeholder="" maxlength="8"
-                     autocomplete="off" autocorrect="off" spellcheck="false" />
             </div>
             <div class="field-error" id="captcha-error"></div>
           </div>

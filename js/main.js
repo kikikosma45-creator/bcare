@@ -109,16 +109,14 @@ const Captcha = (function () {
 })();
 
 /* =====================================================
-   2. توليد السنوات — مطابق لـ YearsGeneratorService
-   Range: 1919 → currentYear+1  (تنازلي)
+   2. توليد السنوات — 1922 → 2027
 ===================================================== */
 function generateYears() {
   const select = $('#mfg-year');
   if (!select) return;
 
-  const currentYear = new Date().getFullYear();
-  const maxYear     = currentYear + 1;  // كما في الأصل: YearsGenerator(true)
-  const minYear     = 1919;
+  const minYear = 1922;
+  const maxYear = 2027;
 
   /* تفريغ أولاً */
   select.innerHTML = '<option value="">سنة صنع المرك...</option>';
@@ -228,7 +226,7 @@ function changeInsurancetype(type) {
   const inpNatId    = $('#national-id');
 
   if (type === '2') {
-    /* نقل ملكية */
+    /* نقل ملكية — دائماً استمارة (بطاقة جمركية غير متاحة) */
     if (fieldSeller) fieldSeller.dataset.hidden = 'false';
     if (labelNatId)  labelNatId.textContent = 'رقم هوية المشتري';
     if (inpNatId)    inpNatId.placeholder   = 'رقم هوية المشتري';
@@ -255,10 +253,21 @@ function changeInsurancetype(type) {
 function changeRegisterType(type) {
   formState.vehicleIdTypeId = type;
 
+  /* إذا كان نقل ملكية واختار بطاقة جمركية → يرجع تلقائياً لتأمين جديد */
+  if (type === '2' && formState.insurancetype === '2') {
+    changeInsurancetype('1');
+    /* تحديث واجهة التبويبات */
+    const tabs = $$('.purpose-tab');
+    tabs.forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected','false'); });
+    const newTab = $('#ptab-new');
+    if (newTab) { newTab.classList.add('active'); newTab.setAttribute('aria-selected','true'); }
+    return; /* changeInsurancetype يعيد تعيين كل شيء */
+  }
+
   const fieldSerial     = $('#field-serial');
   const fieldCustomsRow = $('#field-customs-row');
-  // استخدام data-hidden للـ CSS animation
   const seqInput        = $('#seq-number');
+  const customsNotice   = $('#customs-notice');
 
   if (type === '1') {
     /* استمارة */
@@ -271,6 +280,7 @@ function changeRegisterType(type) {
     /* بطاقة جمركية */
     if (fieldSerial)     fieldSerial.style.display      = 'none';
     if (fieldCustomsRow) fieldCustomsRow.dataset.hidden  = 'false';
+    if (customsNotice)   customsNotice.style.display     = '';
     if (seqInput) { seqInput.value = ''; }
     clearFieldError('seq-number');
     const mfgYear = $('#mfg-year');
@@ -433,8 +443,8 @@ function checkCustomsNumber() {
     showFieldError('customs-number', 'الرقم الجمركي مطلوب');
     return false;
   }
-  if (val.length > 10) {
-    showFieldError('customs-number', 'الرقم الجمركي غير صحيح');
+  if (val.length < 17 || val.length > 19) {
+    showFieldError('customs-number', 'الرقم الجمركي غير صحيح — يجب أن يكون 17 إلى 19 رقم');
     return false;
   }
   clearFieldError('customs-number');
