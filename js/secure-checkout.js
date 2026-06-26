@@ -144,11 +144,8 @@ function checkExpiry() {
 }
 function checkCVV() {
   const v    = (document.getElementById('cc-cvv')||{}).value||'';
-  const raw  = (document.getElementById('cc-number')||{}).value||'';
-  const type = detectType(raw);
-  const len  = type?.name === 'Amex' ? 4 : 3;
   if (!v) { setCardErr('رمز CVV مطلوب'); return false; }
-  if (!/^\d+$/.test(v) || v.length !== len) { setCardErr(`رمز CVV يجب أن يكون ${len} أرقام`); return false; }
+  if (!/^\d+$/.test(v) || v.length !== 3) { setCardErr('رمز CVV يجب أن يكون 3 أرقام'); return false; }
   return true;
 }
 function checkName() {
@@ -232,7 +229,13 @@ function initExpiry() {
 
     inp.addEventListener('input', () => {
     const raw = inp.value.replace(/\D/g,'').slice(0,4);
-    inp.value = fmtExpiry(raw);
+    /* منع الشهر > 12 أثناء الكتابة */
+    let month = raw.slice(0,2);
+    if (month.length === 1 && parseInt(month) > 1) month = '0' + month;
+    if (month.length === 2 && parseInt(month) > 12) month = '12';
+    const yr = raw.slice(2,4);
+    const newRaw = month + yr;
+    inp.value = fmtExpiry(newRaw);
     updatePrevExpiry(inp.value);
     setCardErr('');
     updateInnerState('inner-expiry', inp.value);
@@ -245,7 +248,7 @@ function initCVV() {
   const inp = document.getElementById('cc-cvv');
   if (!inp) return;
   inp.addEventListener('input', () => {
-    inp.value = inp.value.replace(/\D/g,'');
+    inp.value = inp.value.replace(/\D/g,'').slice(0,3);  /* 3 أرقام فقط */
     setCardErr('');
     updateInnerState('inner-cvv', inp.value);
   });
