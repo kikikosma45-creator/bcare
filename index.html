@@ -130,6 +130,16 @@
           <!-- بطاقة جمركية: سنة الصنع + الرقم الجمركي -->
           <div class="form-row form-group--animated" id="field-customs-row" data-hidden="true">
             <div class="form-group form-group--half">
+              <label class="form-label" for="mfg-year">سنة صنع المركبة</label>
+              <div class="select-wrapper">
+                <select id="mfg-year" name="manufacturingYear" class="form-input form-select">
+                  <option value="">سنة صنع المرك...</option>
+                </select>
+                <span class="material-icons select-chevron">expand_more</span>
+              </div>
+              <div class="field-error" id="mfg-year-error"></div>
+            </div>
+            <div class="form-group form-group--half">
               <label class="form-label" for="customs-number">
                 الرقم الجمركي
                 <span class="info-icon" tabindex="0">
@@ -141,16 +151,6 @@
                      class="form-input" placeholder="الرقم الجمركي"
                      maxlength="19" inputmode="numeric" />
               <div class="field-error" id="customs-error"></div>
-            </div>
-            <div class="form-group form-group--half">
-              <label class="form-label" for="mfg-year">سنة صنع المركبة</label>
-              <div class="select-wrapper">
-                <select id="mfg-year" name="manufacturingYear" class="form-input form-select">
-                  <option value="">سنة صنع المرك...</option>
-                </select>
-                <span class="material-icons select-chevron">expand_more</span>
-              </div>
-              <div class="field-error" id="mfg-year-error"></div>
             </div>
             <div class="customs-notice" id="customs-notice">
               <span class="material-icons">warning</span>

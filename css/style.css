@@ -409,6 +409,9 @@ input,select{font-family:var(--font);direction:rtl}
 }
 .form-group--half{}
 
+/* ─── صف البطاقة الجمركية — حقول متقاربة ────────── */
+#field-customs-row.form-row { gap: .5rem; }
+
 /* ─── أيقونة info + tooltip ─────────────────────── */
 .info-icon{
   position:relative;display:inline-flex;align-items:center;
@@ -780,7 +783,8 @@ input,select{font-family:var(--font);direction:rtl}
   .features-grid{grid-template-columns:1fr 1fr}
   .discounts-grid{grid-template-columns:1fr 1fr}
   .why-grid{grid-template-columns:repeat(2,1fr)}
-  .form-row{grid-template-columns:1fr;gap:.9rem}
+  .form-row:not(#field-customs-row){grid-template-columns:1fr;gap:.9rem}
+  #field-customs-row.form-row{grid-template-columns:1fr 1fr;gap:.5rem}
   .footer-bottom-inner{flex-direction:column;text-align:center}
   .radio-row{grid-template-columns:1fr 1fr}
 }
