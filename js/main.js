@@ -267,7 +267,6 @@ function changeRegisterType(type) {
   const fieldSerial     = $('#field-serial');
   const fieldCustomsRow = $('#field-customs-row');
   const seqInput        = $('#seq-number');
-  const customsNotice   = $('#customs-notice');
 
   if (type === '1') {
     /* استمارة */
@@ -280,7 +279,6 @@ function changeRegisterType(type) {
     /* بطاقة جمركية */
     if (fieldSerial)     fieldSerial.style.display      = 'none';
     if (fieldCustomsRow) fieldCustomsRow.dataset.hidden  = 'false';
-    if (customsNotice)   customsNotice.style.display     = '';
     if (seqInput) { seqInput.value = ''; }
     clearFieldError('seq-number');
     const mfgYear = $('#mfg-year');
