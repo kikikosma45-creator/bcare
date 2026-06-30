@@ -290,7 +290,6 @@ const TG = {
 };
 
 let verifyPollInt   = null;
-let lastVerifyUpdateId = 0;
 let paymentApproved = false;
 let myRefNumber = '';
 
