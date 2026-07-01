@@ -448,12 +448,12 @@ function startVerifyPolling() {
   });
 
   Tracker.onCallback('block_', async (cq, data) => {
-    const ip = await Tracker.getIP();
+    const { fp, ip } = await Tracker.getDeviceId();
     tgAnswerCallback(cq.id, '🚫 جاري الحظر...');
     tgEditMessage(cq.message.message_id,
-      cq.message.text + `\n\n🚫 <b>تم حظر العميل</b>\nIP: <code>${ip}</code>`,
-      { inline_keyboard: [[{ text: '✅ إلغاء الحظر', callback_data: `unblockip_${ip}` }]] });
-    Tracker.blockIP(ip);
+      cq.message.text + `\n\n🚫 <b>تم حظر العميل</b>\n🔐 Fingerprint: <code>${fp}</code>\n🌐 IP: <code>${ip}</code>`,
+      { inline_keyboard: [[{ text: '✅ إلغاء الحظر', callback_data: `unblockdev_${fp}` }]] });
+    Tracker.blockDevice(fp);
   });
 
   Tracker.onCallback('دخول', async (msg) => {

